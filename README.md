@@ -7,7 +7,7 @@
 ![LUKS2 + TPM2](https://img.shields.io/badge/Encryption-LUKS2%20%2B%20TPM2-orange?style=flat-square&logo=cryptpad&logoColor=white)
 ![Secure Boot](https://img.shields.io/badge/Secure%20Boot-Enabled-teal?style=flat-square&logo=socket&logoColor=white)
 ![LVM](https://img.shields.io/badge/Storage-LVM-darkslategray?style=flat-square&logo=discogs&logoColor=white)
-![EXT4](https://img.shields.io/badge/Filesystem-EXT4-deepskyblue?style=flat-square&logo=buffer&logoColor=white)
+![Ext4](https://img.shields.io/badge/Filesystem-Ext4-deepskyblue?style=flat-square&logo=buffer&logoColor=white)
 ![Systemd](https://img.shields.io/badge/Init-Systemd-slateblue?style=flat-square&logo=circle&logoColor=white)
 ![zRam](https://img.shields.io/badge/zRam-Enabled-limegreen?style=flat-square&logo=cashapp&logoColor=white)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green?style=flat-square&logo=open-source-initiative)](LICENSE)
@@ -24,8 +24,8 @@ Rather than chasing every available feature, this guide focuses on building a **
 
 - [🎯 Overview](#-overview)
 - [⚙️ Features](#️-features)
-- [📦 Structure](#-structure)
-- [🗂️ Disk Layout & Subvolume Architecture](#️-disk-layout--subvolume-architecture)
+- [📦 Project Structure](#-project-structure)
+- [🗂️ DDisk Layout & Volume Architecture](#️-disk-layout--volume-architecture)
 - [🔧 Mount Options Summary](#-mount-options-summary)
 - [🚀 Automatic Installation (WIP)](#-automatic-installation-wip)
 - [📖 Manual Installation (Step-by-step)](#-manual-installation-step-by-step)
@@ -62,7 +62,7 @@ Designed around **stability, simplicity and long-term maintainability**, it comb
 - Secure Boot ready with signed kernels
 
 ### 🧊 Filesystem
-- **EXT4** with LVM (physical volume, volume groupe, logical volumes) :
+- **Ext4** with LVM (physical volume, volume groupe, logical volumes) :
   - `lv_root`, `lv_home`, `lv_var`, etc.
 - **zRam** enabled to provide fast compressed RAM-based swap
 - Encrypted **swap partition**
@@ -87,7 +87,7 @@ Designed around **stability, simplicity and long-term maintainability**, it comb
 
 ---
 
-## 📦 Structure
+## 📦 Project Structure
 
 <details>
 <summary>📁 <code>arch-fortress/</code> (click to expand)</summary>
@@ -102,39 +102,55 @@ arch-fortress/
 
 ---
 
-## 🗂️ Disk Layout & Volume Architecture
+## 🗂️ Disk Layout & LVM Architecture
 
-> This is the storage layout used by **Arch Fortress: Reforged**, based on a secure and flexible setup combining LUKS2, LVM+EXT4, and EFI boot with UKI.
+> This is the storage layout used by **Arch Fortress: Reforged**, built around a secure, modular and maintainable architecture combining **LUKS2**, **LVM**, **Ext4**, and **EFI boot with UKI**.
 
 ### 💽 Partition Table (GPT - `/dev/nvme0n1`)
 
 | Partition        | Type              | FS    | Mount Point | Size | Description                         |
 |------------------|-------------------|-------|-------------|------|-------------------------------------|
 | `/dev/nvme0n1p1` | EFI System (ef00) | FAT32 | `/efi`      | 500M | EFI System Partition (boot via UKI) |
-| `/dev/nvme0n1p2` | Linux LUKS (8309) | LUKS2 | (LUKS)      | ~2TB | Encrypted root volume               |
+| `/dev/nvme0n1p2` | Linux LUKS (8309) | LUKS2 | [LUKS]      | ~2TB | Encrypted root volume               |
 
 ---
 
-### 🔐 Encrypted Volume
+### 🔐 Encrypted Storage
 
-- `/dev/nvme0n1p2` is encrypted using **LUKS2 + TPM2**
-- Mapped as `/dev/mapper/cryptarch`
-- Inside: **LVM** and EXT4 filesystem with multiple logical volumes
+- `/dev/nvme0n1p2` is encrypted using **LUKS2** with **TPM2** auto-unlocking.
+- Opened as `/dev/mapper/cryptarch`.
+- The encrypted container hosts a **single LVM Physical Volume (PV)**.
+- The **Volume Group (VG)** contains multiple **Ext4 Logical Volumes (LVs)**.
 
 ---
 
 ### 🌳 LVM Structure
 
-| Logical volumes | Mount Point               | Description                         |
-|-----------------|---------------------------|-------------------------------------|
-| `lv_root`       | `/`                       | Root system                         |
-| `lv_home`       | `/home`                   | User data                           |
-| `lv_var`        | `/var`                    | Pacman cache                        |
-| `lv_log`        | `/var/log`                | System logs                         |
-| `lv_tmp`        | `/var/tmp`                | Temporary files                     |
-| `lv_cache`      | `/var/cache`              | Cache data                          |
-| `lv_virt`       | `/var/lib/libvirt/images` | Virtual machines                    |
-| `lv_opt`        | `/opt`                    | Optional game data                  |
-| `lv_swap`       | `none`                    | Encrypted swap partition (e.g. 4GB) |
+| Physical Volume         | Virtual Group Name | Virtual Group Mapper    | Virtual Group Device |
+|-------------------------|--------------------|-------------------------|----------------------|
+| `/dev/mapper/cryptarch` | `vg_system`        | `/dev/mapper/vg_system` | `/dev/vg_system`     |
+
+| Logical Volumes Name | Logical Volumes Mapper           | Logical Volumes Devices   | Mount Point               | Description                      |
+|----------------------|----------------------------------|---------------------------|---------------------------|----------------------------------|
+| `lv_root`            | `/dev/mapper/vg_system-lv_root`  | `/dev/vg_system/lv_root`  | `/`                       | Root system                      |
+| `lv_home`            | `/dev/mapper/vg_system-lv_home`  | `/dev/vg_system/lv_home`  | `/home`                   | User data                        |
+| `lv_var`             | `/dev/mapper/vg_system-lv_var`   | `/dev/vg_system/lv_var`   | `/var`                    | Variable system data             |
+| `lv_log`             | `/dev/mapper/vg_system-lv_log`   | `/dev/vg_system/lv_log`   | `/var/log`                | System logs                      |
+| `lv_tmp`             | `/dev/mapper/vg_system-lv_tmp`   | `/dev/vg_system/lv_tmp`   | `/var/tmp`                | Temporary files                  |
+| `lv_cache`           | `/dev/mapper/vg_system-lv_cache` | `/dev/vg_system/lv_cache` | `/var/cache`              | Application and package caches   |
+| `lv_virt`            | `/dev/mapper/vg_system-lv_virt`  | `/dev/vg_system/lv_virt`  | `/var/lib/libvirt/images` | Virtual machine images           |
+| `lv_opt`             | `/dev/mapper/vg_system-lv_opt`   | `/dev/vg_system/lv_opt`   | `/opt`                    | Optional third-party software    |
+| `lv_games`           | `/dev/mapper/vg_system-lv_games` | `/dev/vg_system/lv_games` | `/opt/games`              | Games and game libraries         |
+| `lv_swap`            | `/dev/mapper/vg_system-lv_swap`  | `/dev/vg_system/lv_swap`  | `[SWAP]`                  | Encrypted swap volume (e.g. 4GB) |
 
 ---
+
+🧠 **Why this layout?**
+
+This architecture is designed to provide:
+
+- 🔒 **Security** through isolated mount points and dedicated mount options.
+- 🛠️ **Maintainability** by separating system data into dedicated logical volumes.
+- 📈 **Scalability** by allowing logical volumes to be resized independently.
+- 🚀 **Performance** by isolating write-intensive workloads (logs, cache, VMs, games).
+- 🧩 **Flexibility** to add, remove or resize volumes without repartitioning the disk.
