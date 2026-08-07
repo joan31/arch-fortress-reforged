@@ -141,6 +141,7 @@ arch-fortress/
 | `lv_virt`            | `/dev/mapper/vg_system-lv_virt`  | `/dev/vg_system/lv_virt`  | `/var/lib/libvirt/images` | Virtual machine images           |
 | `lv_opt`             | `/dev/mapper/vg_system-lv_opt`   | `/dev/vg_system/lv_opt`   | `/opt`                    | Optional third-party software    |
 | `lv_games`           | `/dev/mapper/vg_system-lv_games` | `/dev/vg_system/lv_games` | `/opt/games`              | Games and game libraries         |
+| `lv_srv`             | `/dev/mapper/vg_system-lv_srv`   | `/dev/vg_system/lv_srv`   | `/srv`                    | Server data                      |
 | `lv_swap`            | `/dev/mapper/vg_system-lv_swap`  | `/dev/vg_system/lv_swap`  | `[SWAP]`                  | Encrypted swap volume (e.g. 4GB) |
 
 ---
@@ -154,3 +155,61 @@ This architecture is designed to provide:
 - 📈 **Scalability** by allowing logical volumes to be resized independently.
 - 🚀 **Performance** by isolating write-intensive workloads (logs, cache, VMs, games).
 - 🧩 **Flexibility** to add, remove or resize volumes without repartitioning the disk.
+
+---
+
+### 🖼️ Layout Diagram
+
+```
+Disk: /dev/nvme0n1 (GPT)
+┌──────────────────────────────────────────────────────┐
+│ Partition Table                                      │
+│──────────────────────────────────────────────────────│
+│ /dev/nvme0n1p1   → EFI System (FAT32, 500M)          │
+│                  └── Mounted at /efi                 │
+│                                                      │
+│ /dev/nvme0n1p2   → LUKS2 Encrypted Volume (~2TB)     │
+│                  └── mapper/cryptarch                │
+│                      └── LVM Pysical Volume          │
+│                          └── LVM Virtual Group       │
+│                              └── LVM Logical Volumes │
+│                                  └── Ext4 Filesystem │
+└──────────────────────────────────────────────────────┘
+```
+
+LVM Logical Volumes (inside /dev/mapper/cryptarch):
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│ lv_root   → /                                      ← Root filesystem      │
+│ lv_home   → /home                                                         │
+│ lv_var    → /var                                                          │
+│ lv_log    → /var/log                                                      │
+│ lv_tmp    → /var/tmp                                                      │
+│ lv_cache  → /var/cache                                                    │
+│ lv_virt   → /var/lib/libvirt/images                                       │
+│ lv_opt    → /opt                                                          │
+│ lv_games  → /opt/games                                                    │
+│ lv_srv    → /srv                                                          │
+│ lv_swap   → [SWAP]                   ← Encrypted swap partition (e.g. 4G) │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+Boot process:
+
+```
+[ EFI Firmware ]
+    ↓
+[ UKI Image (.efi) in /efi ]
+    ↓
+[ systemd (init) in initramfs ]
+    ↓
+[ Unlock LUKS via TPM2 ]
+    ↓
+[ Mount BTRFS subvolumes ]
+    ↓
+[ Boot into secure, modern Arch Fortress 🔐🛡️ ]
+```
+
+---
+
