@@ -130,19 +130,19 @@ arch-fortress/
 |-------------------------|--------------------|-------------------------|----------------------|
 | `/dev/mapper/cryptarch` | `vg_system`        | `/dev/mapper/vg_system` | `/dev/vg_system`     |
 
-| Logical Volumes Name | Logical Volumes Mapper           | Logical Volumes Devices   | Mount Point               | Description                      |
-|----------------------|----------------------------------|---------------------------|---------------------------|----------------------------------|
-| `lv_root`            | `/dev/mapper/vg_system-lv_root`  | `/dev/vg_system/lv_root`  | `/`                       | Root system                      |
-| `lv_home`            | `/dev/mapper/vg_system-lv_home`  | `/dev/vg_system/lv_home`  | `/home`                   | User data                        |
-| `lv_var`             | `/dev/mapper/vg_system-lv_var`   | `/dev/vg_system/lv_var`   | `/var`                    | Variable system data             |
-| `lv_log`             | `/dev/mapper/vg_system-lv_log`   | `/dev/vg_system/lv_log`   | `/var/log`                | System logs                      |
-| `lv_tmp`             | `/dev/mapper/vg_system-lv_tmp`   | `/dev/vg_system/lv_tmp`   | `/var/tmp`                | Temporary files                  |
-| `lv_cache`           | `/dev/mapper/vg_system-lv_cache` | `/dev/vg_system/lv_cache` | `/var/cache`              | Application and package caches   |
-| `lv_virt`            | `/dev/mapper/vg_system-lv_virt`  | `/dev/vg_system/lv_virt`  | `/var/lib/libvirt/images` | Virtual machine images           |
-| `lv_opt`             | `/dev/mapper/vg_system-lv_opt`   | `/dev/vg_system/lv_opt`   | `/opt`                    | Optional third-party software    |
-| `lv_games`           | `/dev/mapper/vg_system-lv_games` | `/dev/vg_system/lv_games` | `/opt/games`              | Games and game libraries         |
-| `lv_srv`             | `/dev/mapper/vg_system-lv_srv`   | `/dev/vg_system/lv_srv`   | `/srv`                    | Server data                      |
-| `lv_swap`            | `/dev/mapper/vg_system-lv_swap`  | `/dev/vg_system/lv_swap`  | `[SWAP]`                  | Encrypted swap volume (e.g. 4GB) |
+| Logical Volumes Names | Logical Volumes Mapper           | Logical Volumes Devices   | Mount Point               | Description                      |
+|-----------------------|----------------------------------|---------------------------|---------------------------|----------------------------------|
+| `lv_root`             | `/dev/mapper/vg_system-lv_root`  | `/dev/vg_system/lv_root`  | `/`                       | Root system                      |
+| `lv_home`             | `/dev/mapper/vg_system-lv_home`  | `/dev/vg_system/lv_home`  | `/home`                   | User data                        |
+| `lv_var`              | `/dev/mapper/vg_system-lv_var`   | `/dev/vg_system/lv_var`   | `/var`                    | Variable system data             |
+| `lv_log`              | `/dev/mapper/vg_system-lv_log`   | `/dev/vg_system/lv_log`   | `/var/log`                | System logs                      |
+| `lv_tmp`              | `/dev/mapper/vg_system-lv_tmp`   | `/dev/vg_system/lv_tmp`   | `/var/tmp`                | Temporary files                  |
+| `lv_cache`            | `/dev/mapper/vg_system-lv_cache` | `/dev/vg_system/lv_cache` | `/var/cache`              | Application and package caches   |
+| `lv_virt`             | `/dev/mapper/vg_system-lv_virt`  | `/dev/vg_system/lv_virt`  | `/var/lib/libvirt/images` | Virtual machine images           |
+| `lv_opt`              | `/dev/mapper/vg_system-lv_opt`   | `/dev/vg_system/lv_opt`   | `/opt`                    | Optional third-party software    |
+| `lv_games`            | `/dev/mapper/vg_system-lv_games` | `/dev/vg_system/lv_games` | `/opt/games`              | Games and game libraries         |
+| `lv_srv`              | `/dev/mapper/vg_system-lv_srv`   | `/dev/vg_system/lv_srv`   | `/srv`                    | Server data                      |
+| `lv_swap`             | `/dev/mapper/vg_system-lv_swap`  | `/dev/vg_system/lv_swap`  | `[SWAP]`                  | Encrypted swap volume (e.g. 4GB) |
 
 ---
 
@@ -197,7 +197,7 @@ LVM Logical Volumes (inside /dev/mapper/cryptarch):
 
 Boot process:
 
-```
+```text
 [ EFI Firmware ]
     ↓
 [ UKI Image (.efi) in /efi ]
@@ -206,10 +206,76 @@ Boot process:
     ↓
 [ Unlock LUKS via TPM2 ]
     ↓
-[ Mount BTRFS subvolumes ]
+[ Activate LVM Volume Group ]
+    ↓
+[ Mount Ext4 Logical Volumes ]
     ↓
 [ Boot into secure, modern Arch Fortress 🔐🛡️ ]
 ```
 
 ---
 
+## 🔧 Mount Options Summary
+
+### 📂 Mount Points and Options
+
+| 📍 Mount Point | 💽 Devices | 🗂️ Logical Volumes | ⚙️ Mount Options |
+|----------------|-----------|-------------------|------------------|
+| `/` | `/dev/vg_system/lv_root` | `lv_root` | `rw,noatime,nodiratime,errors=remount-ro` |
+| `/efi` | `/dev/nvme0n1p1` | *(N/A)* | `rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022` |
+| `/home` | `/dev/vg_system/lv_home` | `lv_home` | `rw,noatime,nodiratime,nodev,nosuid` |
+| `/srv` | `/dev/vg_system/lv_srv` | `lv_srv` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
+| `/opt` | `/dev/vg_system/lv_opt` | `lv_opt` | `rw,noatime,nodiratime,nodev,nosuid` |
+| `/opt/games` | `/dev/vg_system/lv_games` | `lv_games` | `rw,noatime,nodiratime,nodev,nosuid` |
+| `/var` | `/dev/vg_system/lv_var` | `lv_var` | `rw,noatime,nodiratime,nodev,nosuid` |
+| `/var/log` | `/dev/vg_system/lv_log` | `lv_log` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
+| `/var/cache` | `/dev/vg_system/lv_cache` | `lv_cache` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
+| `/var/tmp` | `/dev/vg_system/lv_tmp` | `lv_tmp` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
+| `/var/lib/libvirt/images` | `/dev/vg_system/lv_libvirt` | `lv_libvirt` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
+| `[SWAP]` | `/dev/vg_system/lv_swap` | `lv_swap` | `defaults` |
+
+---
+
+### 📖 Mount Options Explanation
+
+| ⚙️ Option | 🔎 Description | 🏷️ Category |
+|-----------|---------------|-------------|
+| `rw` | Mount filesystem in read-write mode. | 🔧 Default |
+| `noatime` | Do not update file access timestamps (reduces unnecessary SSD writes). | 🚀 Performance |
+| `nodiratime` | Do not update directory access timestamps *(redundant with `noatime`, kept for consistency).* | 🚀 Performance |
+| `nodev` | Prevent character/block device files from being interpreted on this filesystem. | 🔒 Security |
+| `nosuid` | Ignore SUID and SGID permission bits. | 🔒 Security |
+| `noexec` | Prevent execution of binaries from this filesystem. | 🔒 Security |
+| `errors=remount-ro` | Remount the filesystem read-only if a filesystem error is detected, helping prevent further corruption. | 🛡️ Reliability |
+| `fmask=0022` | File permission mask for the FAT32 EFI System Partition. | 🔒 Security |
+| `dmask=0022` | Directory permission mask for the FAT32 EFI System Partition. | 🔒 Security |
+| `defaults` | Standard swap mount options. | 🔧 Default |
+
+---
+
+### 🔎 Why these mount options?
+
+These options are carefully chosen for:
+
+- 🚀 **Performance**: reduce unnecessary SSD writes using `noatime` and `nodiratime`.
+- 🔒 **Security**: apply `nodev`, `nosuid` and `noexec` only where they make sense.
+- 🛡️ **Reliability**: `errors=remount-ro` protects the root filesystem against further corruption.
+- 📦 **Isolation**: logs, cache, temporary files, virtual machine images and game libraries are isolated in dedicated Logical Volumes.
+- 💽 **Flexibility**: LVM allows online resizing of individual filesystems without repartitioning the disk.
+- 🎮 **Game preservation**: `/opt/games` is isolated in its own Logical Volume, allowing Steam and standalone game libraries to be preserved and reused independently of the operating system during a reinstall.
+
+---
+
+### ✅ Quick Summary
+
+| 🎯 Aspect | ⚙️ Strategy |
+|------------|------------|
+| SSD optimization | `noatime`, `nodiratime` + `fstrim.timer` |
+| Reduce writes | `noatime`, `nodiratime` |
+| Security hardening | `nodev`, `nosuid`, `noexec` where appropriate |
+| Filesystem reliability | `errors=remount-ro` |
+| Storage architecture | LUKS2 + LVM + Ext4 |
+| Flexible storage | Independent Logical Volumes |
+| OS reinstallation | Preserve `/home`, `/opt/games` and VM images independently |
+
+---
