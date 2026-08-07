@@ -25,9 +25,8 @@ Rather than chasing every available feature, this guide focuses on building a **
 - [🎯 Overview](#-overview)
 - [⚙️ Features](#️-features)
 - [📦 Project Structure](#-project-structure)
-- [🗂️ DDisk Layout & Volume Architecture](#️-disk-layout--volume-architecture)
+- [🗂️ Disk Layout & Volume Architecture](#️-disk-layout--volume-architecture)
 - [🔧 Mount Options Summary](#-mount-options-summary)
-- [🚀 Automatic Installation (WIP)](#-automatic-installation-wip)
 - [📖 Manual Installation (Step-by-step)](#-manual-installation-step-by-step)
 - [❓ FAQ](#-faq)
 - [🛠 Requirements](#-requirements)
@@ -224,14 +223,14 @@ Disk: /dev/nvme0n1 (GPT)
 | `/` | `/dev/vg_system/lv_root` | `lv_root` | `rw,noatime,nodiratime,errors=remount-ro` |
 | `/efi` | `/dev/nvme0n1p1` | *(N/A)* | `rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022` |
 | `/home` | `/dev/vg_system/lv_home` | `lv_home` | `rw,noatime,nodiratime,nodev,nosuid` |
-| `/srv` | `/dev/vg_system/lv_srv` | `lv_srv` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
-| `/opt` | `/dev/vg_system/lv_opt` | `lv_opt` | `rw,noatime,nodiratime,nodev,nosuid` |
-| `/opt/games` | `/dev/vg_system/lv_games` | `lv_games` | `rw,noatime,nodiratime,nodev,nosuid` |
 | `/var` | `/dev/vg_system/lv_var` | `lv_var` | `rw,noatime,nodiratime,nodev,nosuid` |
 | `/var/log` | `/dev/vg_system/lv_log` | `lv_log` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
-| `/var/cache` | `/dev/vg_system/lv_cache` | `lv_cache` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
 | `/var/tmp` | `/dev/vg_system/lv_tmp` | `lv_tmp` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
-| `/var/lib/libvirt/images` | `/dev/vg_system/lv_libvirt` | `lv_libvirt` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
+| `/var/cache` | `/dev/vg_system/lv_cache` | `lv_cache` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
+| `/var/lib/libvirt/images` | `/dev/vg_system/lv_virt` | `lv_virt` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
+| `/opt` | `/dev/vg_system/lv_opt` | `lv_opt` | `rw,noatime,nodiratime,nodev,nosuid` |
+| `/opt/games` | `/dev/vg_system/lv_games` | `lv_games` | `rw,noatime,nodiratime,nodev,nosuid` |
+| `/srv` | `/dev/vg_system/lv_srv` | `lv_srv` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
 | `[SWAP]` | `/dev/vg_system/lv_swap` | `lv_swap` | `defaults` |
 
 ---
@@ -335,8 +334,7 @@ sgdisk --clear --align-end \
   /dev/nvme0n1
 ```
 
-### 🧼 Step 3 — Filesystem Creation
-
+### 🧼 Step 3 — Main Filesystem Creation
 
 - 🧴 Format EFI partition (optimized for NVMe 4K sector size)
 ```bash
@@ -357,87 +355,103 @@ cryptsetup --allow-discards --persistent open --type luks2 \
   /dev/nvme0n1p2 cryptarch
 ```
 
-- 🧊 Format the unlocked LUKS volume with BTRFS (4K sectors)
+- 🧱 Initialize the LVM Physical Volume (PV)
 ```bash
-mkfs.btrfs -L "Arch Linux" -s 4096 /dev/mapper/cryptarch
+pvcreate /dev/mapper/cryptarch
 ```
 
-### 🌳 Step 4 — BTRFS Subvolume Layout
-
-- 🪵 Mount the root BTRFS volume temporarily
+- 🗃️ Create the Volume Group (VG)
 ```bash
-mount -o rw,noatime,nodiratime,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120 \
-  /dev/mapper/cryptarch /mnt
+vgcreate vg_system /dev/mapper/cryptarch
 ```
 
-- 📂 Create BTRFS subvolumes
+### 🌳 Step 4 — Logical Volume Creation & Formatting
+
+- 📦 Create the Logical Volumes (LVs)
+> 💡 **Adjust the sizes below according to your storage requirements.**
 ```bash
-btrfs subvolume create /mnt/@
-btrfs subvolume create /mnt/@swap
-btrfs subvolume create /mnt/@snapshots
-btrfs subvolume create /mnt/@efibck
-btrfs subvolume create /mnt/@log
-btrfs subvolume create /mnt/@pkg
-btrfs subvolume create /mnt/@tmp
-btrfs subvolume create /mnt/@vms
-btrfs subvolume create /mnt/@home
-btrfs subvolume create /mnt/@srv
-btrfs subvolume create /mnt/@games
+lvcreate -L 15G -n lv_root vg_system
+lvcreate -L 50G -n lv_home vg_system
+lvcreate -L 5G -n lv_var vg_system
+lvcreate -L 5G -n lv_log vg_system
+lvcreate -L 5G -n lv_tmp vg_system
+lvcreate -L 5G -n lv_cache vg_system
+lvcreate -L 100G -n lv_virt vg_system
+lvcreate -L 50G -n lv_opt vg_system
+lvcreate -L 200G -n lv_games vg_system
+lvcreate -L 100M -n lv_srv vg_system
+lvcreate -L 4G -n lv_swap vg_system
 ```
 
-- 🔓 Unmount the volume before remounting subvolumes individually
+> 💡 **Note:** The swap Logical Volume (`lv_swap`) is created in this step to reserve the required storage space, but it will be initialized later in **Step 6** after all filesystems have been created and mounted.
+
+- 🧊 Format the Ext4 Logical Volumes
 ```bash
-umount /mnt
+mkfs.ext4 -b 4096 -L "Linux Root" -m 1 /dev/vg_system/lv_root
+mkfs.ext4 -b 4096 -L "Linux Home" -m 1 /dev/vg_system/lv_home
+mkfs.ext4 -b 4096 -L "Linux Var" -m 1 /dev/vg_system/lv_var
+mkfs.ext4 -b 4096 -L "Linux Log" -m 1 /dev/vg_system/lv_log
+mkfs.ext4 -b 4096 -L "Linux Tmp" -m 1 /dev/vg_system/lv_tmp
+mkfs.ext4 -b 4096 -L "Linux Cache" -m 1 /dev/vg_system/lv_cache
+mkfs.ext4 -b 4096 -L "Linux Virt" -m 1 /dev/vg_system/lv_virt
+mkfs.ext4 -b 4096 -L "Linux Opt" -m 1 /dev/vg_system/lv_opt
+mkfs.ext4 -b 4096 -L "Linux Games" -m 1 /dev/vg_system/lv_games
+mkfs.ext4 -b 4096 -L "Linux Srv" -m 1 /dev/vg_system/lv_srv
 ```
 
-### 🛠️ Step 5 — Mount Subvolumes & Prepare System
+---
 
-- 🔧 Mount root subvolume
+### 🛠️ Step 5 — Mount Logical Volumes & Prepare the Installation
+
+- 🔧 Mount the root filesystem
 ```bash
-mount -o rw,noatime,nodiratime,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@ \
-  /dev/mapper/cryptarch /mnt
+mount -o rw,noatime,nodiratime,errors=remount-ro /dev/vg_system/lv_root /mnt
 ```
 
-- 🗂️ Create necessary mount points
+- 🗂️ Create the required mount points
 ```bash
-mkdir -p /mnt/{efi,.swap,.snapshots,.efibackup,var/{log,tmp,cache/pacman/pkg,lib/libvirt/images},home,srv,opt/games}
+mkdir -p /mnt/{efi,home,srv,opt/games,var/{log,tmp,cache,lib/libvirt/images}}
 ```
 
-- 🖥️ Mount EFI system partition (read-only, noexec for safety)
+- 🖥️ Mount the EFI System Partition
 ```bash
 mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022 \
   /dev/nvme0n1p1 /mnt/efi
 ```
 
-- 🧷 Mount other BTRFS subvolumes
+- 🧷 Mount the remaining Logical Volumes
 ```bash
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@swap /dev/mapper/cryptarch /mnt/.swap
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@snapshots /dev/mapper/cryptarch /mnt/.snapshots
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@efibck /dev/mapper/cryptarch /mnt/.efibackup
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@log /dev/mapper/cryptarch /mnt/var/log
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@tmp /dev/mapper/cryptarch /mnt/var/tmp
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@pkg /dev/mapper/cryptarch /mnt/var/cache/pacman/pkg
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@vms /dev/mapper/cryptarch /mnt/var/lib/libvirt/images
-mount -o rw,noatime,nodiratime,nodev,nosuid,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@home /dev/mapper/cryptarch /mnt/home
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@srv /dev/mapper/cryptarch /mnt/srv
-mount -o rw,noatime,nodiratime,nodev,nosuid,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=@games /dev/mapper/cryptarch /mnt/opt/games
+mount -o rw,noatime,nodiratime,nodev,nosuid /dev/vg_system/lv_home /mnt/home
+mount -o rw,noatime,nodiratime,nodev,nosuid /dev/vg_system/lv_var /mnt/var
+mount -o rw,noatime,nodiratime,nodev,nosuid,noexec /dev/vg_system/lv_log /mnt/var/log
+mount -o rw,noatime,nodiratime,nodev,nosuid,noexec /dev/vg_system/lv_tmp /mnt/var/tmp
+mount -o rw,noatime,nodiratime,nodev,nosuid,noexec /dev/vg_system/lv_cache /mnt/var/cache
+mount -o rw,noatime,nodiratime,nodev,nosuid,noexec /dev/vg_system/lv_virt /mnt/var/lib/libvirt/images
+mount -o rw,noatime,nodiratime,nodev,nosuid /dev/vg_system/lv_opt /mnt/opt
+mount -o rw,noatime,nodiratime,nodev,nosuid /dev/vg_system/lv_games /mnt/opt/games
+mount -o rw,noatime,nodiratime,nodev,nosuid,noexec /dev/vg_system/lv_srv /mnt/srv
 ```
 
-### 💾 Step 6 — Create Swap File
+---
 
-- 🛏️ Create 4GB swap file on BTRFS subvolume
+### 💾 Step 6 — Initialize the Swap Logical Volume
+
+- 🛏️ Initialize the dedicated LVM Swap Logical Volume
 ```bash
-btrfs filesystem mkswapfile --size 4g /mnt/.swap/swapfile
-chmod 600 /mnt/.swap/swapfile
+mkswap -L "Linux Swap" /dev/vg_system/lv_swap
 ```
+
+> 🔐 **Note:** The swap Logical Volume is **not enabled at this stage**.
+>
+> Arch Fortress uses an **ephemeral encrypted swap** configured through **`/etc/crypttab`**, using a random key generated from **`/dev/urandom`** at every boot.
+>
+> The encrypted swap mapping and the `swapon` command will therefore be configured later in the installation guide, once the encrypted swap device has been properly configured.
 
 ### 📦 Step 7 — Install Base System
 
 - 🧱 Install base packages, kernel + firmwares, EFI tools, btrfs support, text editor, secure boot tools, splash screen and zRam generator service
 ```bash
-pacstrap /mnt \
-  base base-devel linux linux-headers linux-firmware amd-ucode \
-  neovim efibootmgr btrfs-progs sbctl plymouth zram-generator
+pacstrap /mnt base base-devel linux linux-headers linux-firmware amd-ucode neovim efibootmgr btrfs-progs sbctl plymouth zram-generator
 ```
 > 💡 `base-devel` is required for building packages from the AUR or compiling software from source, and `linux-headers` is needed for DKMS to build and maintain kernel modules.
 
