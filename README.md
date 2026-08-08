@@ -309,17 +309,20 @@ The guide covers:
 ### 🧱 Step 1 — Pre-Installation Setup
 
 - ⌨️ (Optional) Set keyboard layout to French
+
 ```bash
 loadkeys fr
 ```
 
 - 🧼 Clean existing EFI entries if needed (replace X with the entry number)
+
 ```bash
 efibootmgr
 efibootmgr -b X -B
 ```
 
 - 🔐 Update GPG keys from live environment (recommended before installing)
+
 ```bash
 pacman -Sy archlinux-keyring
 ```
@@ -327,6 +330,7 @@ pacman -Sy archlinux-keyring
 ### 💽 Step 2 — Disk Partitioning (GPT)
 
 - ⚙️ Partition the disk: EFI (500MB) + LUKS root (rest of disk)
+
 ```bash
 sgdisk --clear --align-end \
   --new=1:0:+500M --typecode=1:ef00 --change-name=1:"EFI system partition" \
@@ -337,11 +341,13 @@ sgdisk --clear --align-end \
 ### 🧼 Step 3 — Main Filesystem Creation
 
 - 🧴 Format EFI partition (optimized for NVMe 4K sector size)
+
 ```bash
 mkfs.vfat -F 32 -n "SYSTEM" -S 4096 -s 1 /dev/nvme0n1p1
 ```
 
 - 🔐 Create LUKS2 encrypted container with strong encryption options
+
 ```bash
 cryptsetup --type luks2 --cipher aes-xts-plain64 --hash sha512 \
   --iter-time 5000 --key-size 512 --pbkdf argon2id \
@@ -350,17 +356,20 @@ cryptsetup --type luks2 --cipher aes-xts-plain64 --hash sha512 \
 ```
 
 - 🔓 Open the LUKS container as /dev/mapper/cryptarch
+
 ```bash
 cryptsetup --allow-discards --persistent open --type luks2 \
   /dev/nvme0n1p2 cryptarch
 ```
 
 - 🧱 Initialize the LVM Physical Volume (PV)
+
 ```bash
 pvcreate /dev/mapper/cryptarch
 ```
 
 - 🗃️ Create the Volume Group (VG)
+
 ```bash
 vgcreate vg_system /dev/mapper/cryptarch
 ```
@@ -368,7 +377,9 @@ vgcreate vg_system /dev/mapper/cryptarch
 ### 🌳 Step 4 — Logical Volume Creation & Formatting
 
 - 📦 Create the Logical Volumes (LVs)
+
 > 💡 **Adjust the sizes below according to your storage requirements.**
+
 ```bash
 lvcreate -L 15G -n lv_root vg_system
 lvcreate -L 50G -n lv_home vg_system
@@ -404,22 +415,25 @@ mkfs.ext4 -b 4096 -L "Linux Srv" -m 1 /dev/vg_system/lv_srv
 ### 🛠️ Step 5 — Mount Logical Volumes & Prepare the Installation
 
 - 🔧 Mount the root filesystem
+
 ```bash
 mount -o rw,noatime,nodiratime,errors=remount-ro /dev/vg_system/lv_root /mnt
 ```
 
 - 🗂️ Create the required mount points
+
 ```bash
 mkdir -p /mnt/{efi,home,srv,opt/games,var/{log,tmp,cache,lib/libvirt/images}}
 ```
 
 - 🖥️ Mount the EFI System Partition
+
 ```bash
-mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022 \
-  /dev/nvme0n1p1 /mnt/efi
+mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022 /dev/nvme0n1p1 /mnt/efi
 ```
 
 - 🧷 Mount the remaining Logical Volumes
+
 ```bash
 mount -o rw,noatime,nodiratime,nodev,nosuid /dev/vg_system/lv_home /mnt/home
 mount -o rw,noatime,nodiratime,nodev,nosuid /dev/vg_system/lv_var /mnt/var
@@ -437,6 +451,7 @@ mount -o rw,noatime,nodiratime,nodev,nosuid,noexec /dev/vg_system/lv_srv /mnt/sr
 ### 💾 Step 6 — Initialize the Swap Logical Volume
 
 - 🛏️ Initialize the dedicated LVM Swap Logical Volume
+
 ```bash
 mkswap -L "Linux Swap" /dev/vg_system/lv_swap
 ```
@@ -449,32 +464,62 @@ mkswap -L "Linux Swap" /dev/vg_system/lv_swap
 
 ### 📦 Step 7 — Install Base System
 
-- 🧱 Install base packages, kernel + firmwares, EFI tools, btrfs support, text editor, secure boot tools, splash screen and zRam generator service
+- 🧱 Install base packages, kernel + firmwares, EFI tools, text editor, secure boot tools, splash screen and zRam generator service
+
 ```bash
-pacstrap /mnt base base-devel linux linux-headers linux-firmware amd-ucode neovim efibootmgr btrfs-progs sbctl plymouth zram-generator
+pacstrap /mnt base base-devel linux linux-headers linux-firmware amd-ucode neovim efibootmgr sbctl plymouth zram-generator
 ```
+
 > 💡 `base-devel` is required for building packages from the AUR or compiling software from source, and `linux-headers` is needed for DKMS to build and maintain kernel modules.
 
 ### 🗂️ Step 8 — Generate fstab
 
 - 📄 Generate fstab with UUIDs
+
 ```bash
 genfstab -U /mnt >> /mnt/etc/fstab
 ```
 
-- 🔍 (Optional) Review fstab and check "0 1" to enable fsck on `/`
+- 🔍 (Optional) Review fstab and check `dump` and `fsck` settings for each filesystem
+
+📝 `fstab` uses the last two fields to control `dump` and filesystem checks:
+
+| Value | 🔎 Description |
+|-------|----------------|
+| `0 0` | 🚫 Disable `dump` and do not check the filesystem automatically with `fsck`. |
+| `0 1` | 💾 Disable `dump` and check the filesystem first with `fsck` — used for `/`. |
+| `0 2` | 💾 Disable `dump` and check the filesystem after `/` — used for other filesystems. |
+
+> 💡 **Note:** The first value controls the legacy `dump` backup utility and is normally set to `0`. The second value controls the order in which filesystems are checked by `fsck`: `1` for the root filesystem and `2` for other filesystems.
+
 ```bash
-nvim /mnt/etc/fstab
+cat /mnt/etc/fstab
 ```
 
 - Content:
+
 ```bash
-UUID=<BTRFS-UUID-PARTITION>      /      btrfs      rw,noatime,nodiratime,compress=zstd:3,ssd,discard=async,space_cache=v2,commit=120,subvol=/@      0 1
+UUID=<EXT4-UUID-ROOT>       /                          ext4    rw,noatime,nodiratime,errors=remount-ro                                 0 1
+UUID=<FAT32-UUID>           /efi                       vfat    rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022         0 2
+UUID=<EXT4-UUID-HOME>       /home                      ext4    rw,noatime,nodiratime,nodev,nosuid                                      0 2
+UUID=<EXT4-UUID-VAR>        /var                       ext4    rw,noatime,nodiratime,nodev,nosuid                                      0 2
+UUID=<EXT4-UUID-LOG>        /var/log                   ext4    rw,noatime,nodiratime,nodev,nosuid,noexec                               0 2
+UUID=<EXT4-UUID-TMP>        /var/tmp                   ext4    rw,noatime,nodiratime,nodev,nosuid,noexec                               0 2
+UUID=<EXT4-UUID-CACHE>      /var/cache                 ext4    rw,noatime,nodiratime,nodev,nosuid,noexec                               0 2
+UUID=<EXT4-UUID-VIRT>       /var/lib/libvirt/images    ext4    rw,noatime,nodiratime,nodev,nosuid,noexec                               0 2
+UUID=<EXT4-UUID-OPT>        /opt                       ext4    rw,noatime,nodiratime,nodev,nosuid                                      0 2
+UUID=<EXT4-UUID-GAMES>      /opt/games                 ext4    rw,noatime,nodiratime,nodev,nosuid                                      0 2
+UUID=<EXT4-UUID-SRV>        /srv                       ext4    rw,noatime,nodiratime,nodev,nosuid,noexec                               0 2
 ```
+
+> 💡 **Note:** The swap Logical Volume is intentionally not listed here yet. It will be configured later through `/etc/crypttab` as an **encrypted swap device**, using a randomly generated key from `/dev/urandom`.
+
+> 🔐 **Note:** The `UUID=<...>` values above are placeholders. `genfstab` will automatically generate the correct UUID entries for the mounted filesystems. Review the generated file and verify that the mount options and filesystem check values are correct before continuing.
 
 ### 🚪 Step 9 — Enter Chroot
 
 - 🌀 Change root into new system
+
 ```bash
 arch-chroot /mnt
 ```
@@ -482,28 +527,33 @@ arch-chroot /mnt
 ### 🌐 Step 10 — Keyboard & Locale Configuration
 
 - ⌨️ Set virtual console keyboard to French
+
 ```bash
 nvim /etc/vconsole.conf
 ```
 
 - Content:
+
 ```bash
 KEYMAP=fr
 FONT=lat9w-16
 ```
 
 - 🧩 Set X11 keyboard layout
+
 ```bash
 localectl set-x11-keymap fr pc105 azerty compose:rctrl
 ```
 > 💡 This ensures correct keyboard compatibility with Xorg/XWayland apps and proper layout support in display managers like Plasma Login Manager (used by KDE Plasma).
 
 - 🌍 Set system-wide locale
+
 ```bash
 nvim /etc/locale.conf
 ```
 
 - Content:
+
 ```bash
 LANG=fr_FR.UTF-8
 LC_COLLATE=C
@@ -511,17 +561,20 @@ LC_MESSAGES=en_US.UTF-8
 ```
 
 - 🔓 Enable required locales
+
 ```bash
 nvim /etc/locale.gen
 ```
 
 - Uncomment:
+
 ```bash
 en_US.UTF-8 UTF-8
 fr_FR.UTF-8 UTF-8
 ```
 
 - ⚙️ Generate locale definitions
+
 ```bash
 locale-gen
 ```
@@ -529,12 +582,14 @@ locale-gen
 ### 🔢 Step 11 — TTY Behavior (Enable NumLock)
 
 - 🧷 Create drop-in to activate NumLock automatically on TTY login
+
 ```bash
 mkdir /etc/systemd/system/getty@.service.d
 nvim /etc/systemd/system/getty@.service.d/activate-numlock.conf
 ```
 
 - Content:
+
 ```bash
 [Service]
 ExecStartPre=/bin/sh -c 'setleds -D +num < /dev/%I'
@@ -543,21 +598,25 @@ ExecStartPre=/bin/sh -c 'setleds -D +num < /dev/%I'
 ### 🖥️ Step 12 — Host Identity Configuration
 
 - 🏷️ Set system hostname
+
 ```bash
 nvim /etc/hostname
 ```
 
 - Content:
+
 ```bash
 lianli-arch
 ```
 
 - 🧭 Set hosts file entries for local networking
+
 ```bash
 nvim /etc/hosts
 ```
 
 - Content:
+
 ```bash
 127.0.0.1      localhost
 ::1            localhost
@@ -567,11 +626,13 @@ nvim /etc/hosts
 ### 🕒 Step 13 — Timezone & Clock Setup
 
 - 🌍 Set system timezone
+
 ```bash
 ln -sf /usr/share/zoneinfo/Europe/Paris /etc/localtime
 ```
 
 - ⏱️ Sync hardware clock with system time
+
 ```bash
 hwclock --systohc
 ```
@@ -579,11 +640,13 @@ hwclock --systohc
 ### 🧩 Step 14 — Initramfs Configuration (AMDGPU Module, Systemd, LUKS, Keyboard)
 
 - ⚙️ Edit initramfs modules and hooks to include AMDGPU driver before anything, systemd & encryption
+
 ```bash
 nvim /etc/mkinitcpio.conf
 ```
 
 - Content:
+
 ```bash
 MODULES=(amdgpu)
 
@@ -591,16 +654,19 @@ HOOKS=(systemd plymouth autodetect microcode modconf kms keyboard sd-vconsole bl
 ```
 
 - 🔐 Setup encrypted volume for systemd to unlock via TPM2
+
 ```bash
 nvim /etc/crypttab.initramfs
 ```
 
 - Content:
+
 ```bash
 cryptarch UUID=<nvme-UUID> none tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard
 ```
 
 - Get `<nvme-UUID>` on neovim:
+
 ```bash
 :read ! lsblk -dno UUID /dev/nvme0n1p2
 ```
