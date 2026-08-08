@@ -595,6 +595,8 @@ nvim /etc/systemd/system/getty@.service.d/activate-numlock.conf
 ExecStartPre=/bin/sh -c 'setleds -D +num < /dev/%I'
 ```
 
+> 💡 This enables NumLock automatically when a getty session starts on a virtual terminal (TTY).
+
 ### 🖥️ Step 12 — Host Identity Configuration
 
 - 🏷️ Set system hostname
@@ -620,6 +622,7 @@ nvim /etc/hosts
 ```bash
 127.0.0.1      localhost
 ::1            localhost
+127.0.1.1      lianli-arch.zenitram lianli-arch
 192.168.1.101  lianli-arch.zenitram lianli-arch
 ```
 
@@ -637,6 +640,8 @@ ln -sf /usr/share/zoneinfo/Europe/Paris /etc/localtime
 hwclock --systohc
 ```
 
+> 💡 This synchronizes the hardware clock with the configured system time.
+
 ### 🧩 Step 14 — Initramfs Configuration (AMDGPU Module, Systemd, LUKS, Keyboard)
 
 - ⚙️ Edit initramfs modules and hooks to include AMDGPU driver before anything, systemd & encryption
@@ -650,7 +655,7 @@ nvim /etc/mkinitcpio.conf
 ```bash
 MODULES=(amdgpu)
 
-HOOKS=(systemd plymouth autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt filesystems)
+HOOKS=(systemd plymouth autodetect microcode modconf kms keyboard sd-vconsole block sd-encrypt lvm2 filesystems fsck)
 ```
 
 - 🔐 Setup encrypted volume for systemd to unlock via TPM2
@@ -662,10 +667,10 @@ nvim /etc/crypttab.initramfs
 - Content:
 
 ```bash
-cryptarch UUID=<nvme-UUID> none tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard
+cryptarch UUID=<NVME-UUID> none tpm2-device=auto,password-echo=no,x-systemd.device-timeout=0,timeout=0,no-read-workqueue,no-write-workqueue,discard
 ```
 
-- Get `<nvme-UUID>` on neovim:
+- Get `<NVME-UUID>` on neovim:
 
 ```bash
 :read ! lsblk -dno UUID /dev/nvme0n1p2
@@ -673,22 +678,36 @@ cryptarch UUID=<nvme-UUID> none tpm2-device=auto,password-echo=no,x-systemd.devi
 
 ### 🧵 Step 15 — Kernel Command Line Configuration (UKI + disable zswap)
 
-- ⚙️ Root and logging options (read-only fs is handled by systemd and to fsck /)
+- ⚙️ Configure the root filesystem and boot parameters
+
 ```bash
 nvim /etc/cmdline.d/01-root.conf
 ```
 
 - Content:
+
 ```bash
-root=/dev/mapper/cryptarch rootfstype=btrfs rootflags=subvol=@ ro loglevel=3 quiet splash
+root=UUID=<EXT4-UUID-ROOT> rw loglevel=3 quiet
 ```
 
+- Get `<EXT4-UUID-ROOT>` on neovim:
+
+```bash
+:read ! blkid -s UUID -o value /dev/vg_system/lv_root
+```
+
+> 💡 `rw` is required because the `fsck` hook is used in `mkinitcpio`. This allows the root filesystem to be checked before it is mounted during early boot.
+
+> 💡 The `splash` parameter is intentionally omitted because Plymouth is used to provide the boot splash screen. If you want to use the splash screen provided by the `mkinitcpio` preset configured in the following step, you can add `splash` here.
+
 - 🧠 Disable kernel zswap to avoid duplicate swap compression when using zRam as primary swap device
+
 ```bash
 nvim /etc/cmdline.d/02-zswap.conf
 ```
 
 - Content:
+
 ```bash
 zswap.enabled=0
 ```
@@ -696,31 +715,37 @@ zswap.enabled=0
 ### 🧬 Step 16 — Initramfs Preset for Unified Kernel Image (UKI)
 
 - 🔧 Setup mkinitcpio preset to generate a UKI
+
 ```bash
 nvim /etc/mkinitcpio.d/linux.preset
 ```
 
 - Content only:
+
 ```bash
 ALL_kver="/boot/vmlinuz-linux"
 PRESETS=('default')
 default_uki="/efi/EFI/Linux/arch-linux.efi"
 ```
+
 > 💡 `default_options="--splash=/usr/share/systemd/bootctl/splash-arch.bmp"` is commented out by default and can be uncommented to enable the splash screen, but it may be redundant if Plymouth is used.
 
 ### 🔐 Step 17 — Secure Boot with sbctl
 
 - 🔑 Create Secure Boot keys
+
 ```bash
 sbctl create-keys
 ```
 
 - 📥 Enroll custom keys and micr0$0ft💩 keys
+
 ```bash
 sbctl enroll-keys -m
 ```
 
 - 🛠️ Generate the Unified Kernel Image
+
 ```bash
 mkdir -p /efi/EFI/Linux
 mkinitcpio -p linux
@@ -731,6 +756,7 @@ mkinitcpio -p linux
 ### 💻 Step 18 — EFI Boot Entry
 
 - 🧷 Register UKI with UEFI firmware
+
 ```bash
 efibootmgr --create --disk /dev/nvme0n1 --part 1 \
   --label "Arch Linux" --loader /EFI/Linux/arch-linux.efi --unicode
@@ -739,11 +765,13 @@ efibootmgr --create --disk /dev/nvme0n1 --part 1 \
 ### 🧠 Step 19 — zRam Setup
 
 - ⚙️ Configure zRam swap device (primary in-memory compressed swap)
+
 ```bash
 nvim /etc/systemd/zram-generator.conf
 ```
 
 - Content (balanced gaming + desktop performance):
+
 ```bash
 [zram0]
 zram-size = min(ram / 4, 8 * 1024)
@@ -753,11 +781,13 @@ fs-type = swap
 ```
 
 - 🧮 Configure kernel virtual memory parameters for zRam-based swap behavior
+
 ```bash
 nvim /etc/sysctl.d/99-vm-zram-parameters.conf
 ```
 
 - Content (low-latency desktop + gaming responsiveness):
+
 ```bash
 vm.swappiness = 20
 vm.watermark_boost_factor = 0
@@ -767,24 +797,28 @@ vm.page-cluster = 0
 
 ### 🔄 Step 20 — Encrypted Swap Setup
 
-- 🔐 Add encrypted swap mapping using `/dev/urandom` (secure swapfile via device-mapper)
+- 🔐 Add encrypted swap mapping using `/dev/urandom` (secure swap partition via device-mapper)
+
 ```bash
 nvim /etc/crypttab
 ```
 
 - Content:
+
 ```bash
-swap      /.swap/swapfile      /dev/urandom      swap,cipher=aes-xts-plain64,sector-size=4096
+swap      /dev/vg_system/lv_swap      /dev/urandom      swap,cipher=aes-xts-plain64,sector-size=4096
 ```
 
 - 📄 Add swap entry with low priority (fallback to zram)
+
 ```bash
 nvim /etc/fstab
 ```
 
 - Content:
+
 ```bash
-#	/.swap/swapfile      ENCRYPTED FALLBACK SWAP
+#	/dev/vg_system/lv_swap      ENCRYPTED FALLBACK SWAP
 /dev/mapper/swap      none      swap      pri=0      0 0
 ```
 
