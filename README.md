@@ -808,6 +808,14 @@ nvim /etc/crypttab
 swap      /dev/vg_system/lv_swap      /dev/urandom      swap,cipher=aes-xts-plain64,sector-size=4096
 ```
 
+> ⚠️ **Note:** The encrypted swap is identified using the **LVM Logical Volume name** (`/dev/vg_system/lv_swap`) rather than its UUID.
+>
+> This is intentional because the swap device is recreated and re-encrypted at every boot. Since `mkswap` is used again when the encrypted swap is initialized, a new filesystem UUID is generated each time.
+>
+> Therefore, the UUID cannot be used directly as a persistent identifier for this swap device. The stable LVM Logical Volume name (`/dev/vg_system/lv_swap`) is used instead.
+>
+> This avoids the need for an indirect UUID-based method while providing a simple and reliable identifier for the encrypted swap device.
+
 - 📄 Add swap entry with low priority (fallback to zram)
 
 ```bash
