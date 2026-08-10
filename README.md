@@ -46,10 +46,12 @@ Designed around **stability, simplicity and long-term maintainability**, it comb
 - 🚀 **Direct EFI boot** using a signed **Unified Kernel Image (UKI)** — no traditional bootloader required
 - 💥 Full **Secure Boot** support
 - 🧠 Modern `mkinitcpio` using **systemd init hooks**
-- 🧵 **zRAM** enabled for fast compressed in-memory swap
+- 🧵 **zRam** enabled for fast compressed in-memory swap
 - 💾 Encrypted **swap partition** as zRam fallback
   - Uses a transient encryption key generated at boot from `/dev/urandom`  
   - ⚠️ Hibernation is not possible (non-persistent encryption key)
+- 🛟 **UKI Fallback & Previous** for boot recovery and kernel rollback
+- 🗄️ **Automatic EFI partition backup** with a rolling history of previous backups in `/boot/efibackup`
 
 ---
 
@@ -61,18 +63,19 @@ Designed around **stability, simplicity and long-term maintainability**, it comb
 - Secure Boot ready with signed kernels
 
 ### 🧊 Filesystem
-- **Ext4** with LVM (physical volume, volume groupe, logical volumes) :
+- **Ext4 on LVM** using physical volumes, volume groups and logical volumes:
   - `lv_root`, `lv_home`, `lv_var`, etc.
 - **zRam** enabled to provide fast compressed RAM-based swap
-- Encrypted **swap partition**
+- Encrypted **swap partition** as a fallback to zRam
 
 ### ⚙️ Boot Process
-- **No bootloader** (no GRUB, no systemd-boot)
+- **No traditional bootloader** — no GRUB or systemd-boot
 - EFI directly loads a **signed Unified Kernel Image (UKI)**
-- UKI built with `mkinitcpio`, containing:
+- UKIs are built with `mkinitcpio` and contain:
   - Kernel
   - Initramfs
-  - Kernel cmdline
+  - Kernel command line
+  - CPU microcode
 
 ### 🧠 Init System
 - `mkinitcpio` using:
@@ -80,9 +83,16 @@ Designed around **stability, simplicity and long-term maintainability**, it comb
 - No legacy hooks like `udev`, `usr`, `resume`, `keymap`, `consolefont`, `encrypt`
 - Faster, cleaner, future-proof boot
 
-### 🛟 Automatic EFI Backup
-- The `/efi` (ESP) is automatically backed up to `/.efibck`
-- Useful for system recovery
+### 🛟 UKI Recovery & Rollback 
+- **Fallback UKI** built with a more generic initramfs for recovery
+- **Previous UKI** automatically preserved before kernel-related updates
+- Provides a quick boot option if a newly generated UKI or kernel causes a boot failure
+
+### 🗄️ Automatic EFI Partition Backup
+- The `/efi` EFI System Partition (ESP) is automatically backed up before relevant system updates
+- Backups are stored in `/boot/efibackup`
+- A rolling history of the **5 most recent EFI backups** is maintained
+- Provides an additional recovery layer in case of EFI or UKI-related issues
 
 ---
 
@@ -132,6 +142,7 @@ arch-fortress/
 | Logical Volumes Names | Logical Volumes Mapper           | Logical Volumes Devices   | Mount Point               | Description                      |
 |-----------------------|----------------------------------|---------------------------|---------------------------|----------------------------------|
 | `lv_root`             | `/dev/mapper/vg_system-lv_root`  | `/dev/vg_system/lv_root`  | `/`                       | Root system                      |
+| `lv_boot`             | `/dev/mapper/vg_system-lv_boot`  | `/dev/vg_system/lv_boot`  | `/boot`                   | Boot data                        |
 | `lv_home`             | `/dev/mapper/vg_system-lv_home`  | `/dev/vg_system/lv_home`  | `/home`                   | User data                        |
 | `lv_var`              | `/dev/mapper/vg_system-lv_var`   | `/dev/vg_system/lv_var`   | `/var`                    | Variable system data             |
 | `lv_log`              | `/dev/mapper/vg_system-lv_log`   | `/dev/vg_system/lv_log`   | `/var/log`                | System logs                      |
@@ -150,6 +161,7 @@ arch-fortress/
 This architecture is designed to provide:
 
 - 🔒 **Security** through isolated mount points and dedicated mount options.
+- 🛟 **Backups** stored in dedicated boot data volume
 - 🛠️ **Maintainability** by separating system data into dedicated logical volumes.
 - 📈 **Scalability** by allowing logical volumes to be resized independently.
 - 🚀 **Performance** by isolating write-intensive workloads (logs, cache, VMs, games).
@@ -181,6 +193,7 @@ Disk: /dev/nvme0n1 (GPT)
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
 │ lv_root   → /                                      ← Root filesystem      │
+│ lv_boot   → /boot                                                         │
 │ lv_home   → /home                                                         │
 │ lv_var    → /var                                                          │
 │ lv_log    → /var/log                                                      │
@@ -222,6 +235,7 @@ Disk: /dev/nvme0n1 (GPT)
 |----------------|-----------|-------------------|------------------|
 | `/` | `/dev/vg_system/lv_root` | `lv_root` | `rw,noatime,nodiratime,errors=remount-ro` |
 | `/efi` | `/dev/nvme0n1p1` | *(N/A)* | `rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022` |
+| `/boot` | `/dev/vg_system/lv_boot` | `lv_boot` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
 | `/home` | `/dev/vg_system/lv_home` | `lv_home` | `rw,noatime,nodiratime,nodev,nosuid` |
 | `/var` | `/dev/vg_system/lv_var` | `lv_var` | `rw,noatime,nodiratime,nodev,nosuid` |
 | `/var/log` | `/dev/vg_system/lv_log` | `lv_log` | `rw,noatime,nodiratime,nodev,nosuid,noexec` |
@@ -239,16 +253,16 @@ Disk: /dev/nvme0n1 (GPT)
 
 | ⚙️ Option | 🔎 Description | 🏷️ Category |
 |-----------|---------------|-------------|
-| `rw` | Mount filesystem in read-write mode. | 🔧 Default |
-| `noatime` | Do not update file access timestamps (reduces unnecessary SSD writes). | 🚀 Performance |
-| `nodiratime` | Do not update directory access timestamps *(redundant with `noatime`, kept for consistency).* | 🚀 Performance |
-| `nodev` | Prevent character/block device files from being interpreted on this filesystem. | 🔒 Security |
-| `nosuid` | Ignore SUID and SGID permission bits. | 🔒 Security |
-| `noexec` | Prevent execution of binaries from this filesystem. | 🔒 Security |
-| `errors=remount-ro` | Remount the filesystem read-only if a filesystem error is detected, helping prevent further corruption. | 🛡️ Reliability |
-| `fmask=0022` | File permission mask for the FAT32 EFI System Partition. | 🔒 Security |
-| `dmask=0022` | Directory permission mask for the FAT32 EFI System Partition. | 🔒 Security |
-| `pri=0` | Swap mount option with low priority. | 🔧 zRam Fallback |
+| `rw` | Mount filesystem in read-write mode | 🔧 Default |
+| `noatime` | Do not update file access timestamps (reduces unnecessary SSD writes) | 🚀 Performance |
+| `nodiratime` | Do not update directory access timestamps *(redundant with `noatime`, kept for consistency)* | 🚀 Performance |
+| `nodev` | Prevent character/block device files from being interpreted on this filesystem | 🔒 Security |
+| `nosuid` | Ignore SUID and SGID permission bits | 🔒 Security |
+| `noexec` | Prevent execution of binaries from this filesystem | 🔒 Security |
+| `errors=remount-ro` | Remount the filesystem read-only if a filesystem error is detected, helping prevent further corruption | 🛡️ Reliability |
+| `fmask=0022` | File permission mask for the FAT32 EFI System Partition | 🔒 Security |
+| `dmask=0022` | Directory permission mask for the FAT32 EFI System Partition | 🔒 Security |
+| `pri=0` | Swap mount option with low priority | 🔧 zRam Fallback |
 
 ---
 
@@ -305,6 +319,7 @@ The guide covers:
 - 🧵 zRAM configuration
 - 🌀 Encrypted swap configuration
 - 🛡️ Post-install hardening and system optimization
+- 🛟 Setup hooks for previous and backups UKI
 
 ### 🧱 Step 1 — Pre-Installation Setup
 
@@ -382,6 +397,7 @@ vgcreate vg_system /dev/mapper/cryptarch
 
 ```bash
 lvcreate -L 15G -n lv_root vg_system
+lvcreate -L 2G -n lv_boot vg_system
 lvcreate -L 50G -n lv_home vg_system
 lvcreate -L 5G -n lv_var vg_system
 lvcreate -L 5G -n lv_log vg_system
@@ -399,6 +415,7 @@ lvcreate -L 4G -n lv_swap vg_system
 - 🧊 Format the Ext4 Logical Volumes
 ```bash
 mkfs.ext4 -b 4096 -L "Linux Root" -m 1 /dev/vg_system/lv_root
+mkfs.ext4 -b 4096 -L "Linux Boot" -m 1 /dev/vg_system/lv_boot
 mkfs.ext4 -b 4096 -L "Linux Home" -m 1 /dev/vg_system/lv_home
 mkfs.ext4 -b 4096 -L "Linux Var" -m 1 /dev/vg_system/lv_var
 mkfs.ext4 -b 4096 -L "Linux Log" -m 1 /dev/vg_system/lv_log
@@ -423,7 +440,7 @@ mount -o rw,noatime,nodiratime,errors=remount-ro /dev/vg_system/lv_root /mnt
 - 🗂️ Create the required mount points
 
 ```bash
-mkdir -p /mnt/{efi,home,srv,opt/games,var/{log,tmp,cache,lib/libvirt/images}}
+mkdir -p /mnt/{efi,boot,home,var/{log,tmp,cache,lib/libvirt/images},opt/games,srv}
 ```
 
 - 🖥️ Mount the EFI System Partition
@@ -435,6 +452,7 @@ mount -o rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022 /dev/nv
 - 🧷 Mount the remaining Logical Volumes
 
 ```bash
+mount -o rw,noatime,nodiratime,nodev,nosuid,noexec /dev/vg_system/lv_boot /mnt/boot
 mount -o rw,noatime,nodiratime,nodev,nosuid /dev/vg_system/lv_home /mnt/home
 mount -o rw,noatime,nodiratime,nodev,nosuid /dev/vg_system/lv_var /mnt/var
 mount -o rw,noatime,nodiratime,nodev,nosuid,noexec /dev/vg_system/lv_log /mnt/var/log
@@ -501,6 +519,7 @@ cat /mnt/etc/fstab
 ```bash
 UUID=<EXT4-UUID-ROOT>       /                          ext4    rw,noatime,nodiratime,errors=remount-ro                                 0 1
 UUID=<FAT32-UUID>           /efi                       vfat    rw,noatime,nodiratime,nodev,nosuid,noexec,fmask=0022,dmask=0022         0 2
+UUID=<EXT4-UUID-BOOT>       /boot                      ext4    rw,noatime,nodiratime,nodev,nosuid,noexec                               0 2
 UUID=<EXT4-UUID-HOME>       /home                      ext4    rw,noatime,nodiratime,nodev,nosuid                                      0 2
 UUID=<EXT4-UUID-VAR>        /var                       ext4    rw,noatime,nodiratime,nodev,nosuid                                      0 2
 UUID=<EXT4-UUID-LOG>        /var/log                   ext4    rw,noatime,nodiratime,nodev,nosuid,noexec                               0 2
@@ -724,11 +743,16 @@ nvim /etc/mkinitcpio.d/linux.preset
 
 ```bash
 ALL_kver="/boot/vmlinuz-linux"
-PRESETS=('default')
+
+PRESETS=('default' 'fallback')
+
 default_uki="/efi/EFI/Linux/arch-linux.efi"
+
+fallback_uki="/efi/EFI/Linux/arch-linux-fallback.efi"
+fallback_options="-S autodetect"
 ```
 
-> 💡 `default_options="--splash=/usr/share/systemd/bootctl/splash-arch.bmp"` is commented out by default and can be uncommented to enable the splash screen, but it may be redundant if Plymouth is used.
+> 💡 `default_options="--splash=/usr/share/systemd/bootctl/splash-arch.bmp"` is commented out by default and can be uncommented to enable the splash screen, but it may be redundant if **Plymouth** is used.
 
 ### 🔐 Step 17 — Secure Boot with sbctl
 
@@ -759,6 +783,8 @@ mkinitcpio -p linux
 
 ```bash
 efibootmgr --create --disk /dev/nvme0n1 --part 1 --label "Arch Linux" --loader /EFI/Linux/arch-linux.efi --unicode
+
+efibootmgr --create-only --disk /dev/nvme0n1 --part 1 --label "Arch Linux (Fallback)" --loader /EFI/Linux/arch-linux-fallback.efi --unicode
 ```
 
 ### 🧠 Step 19 — zRam Setup
@@ -1268,7 +1294,7 @@ fi
 
 if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q "$EFI_LABEL"; then
     efibootmgr \
-        --create \
+        --create-only \
         --disk "$EFI_DISK" \
         --part "$EFI_PARTITION" \
         --label "$EFI_LABEL" \
@@ -1349,7 +1375,7 @@ nvim /usr/local/sbin/efi_backup.sh
 ## /usr/local/sbin/efi_backup.sh
 
 BACKUP_DIR="/boot/efibackup"
-BACKUP_COUNT=3
+BACKUP_COUNT=5
 
 if [ ! -d "$BACKUP_DIR" ]; then
     mkdir -p "$BACKUP_DIR"
