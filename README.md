@@ -983,6 +983,7 @@ systemctl enable NetworkManager.service
 ```
 
 - 🔧 Enable essential system services
+
 ```bash
 systemctl enable bluetooth.service
 systemctl enable systemd-timesyncd.service
@@ -995,6 +996,7 @@ systemctl enable firewalld.service
 ```
 
 - 🕒 Enable regular TRIM
+
 ```bash
 systemctl enable fstrim.timer
 ```
@@ -1194,8 +1196,6 @@ Arch Linux (Previous)
 
 > 💡 The previous UKI is overwritten before each relevant transaction. This means the system always keeps the **previous version of the currently installed UKI**, rather than maintaining multiple kernel versions.
 
----
-
 #### 🪝 Create the pacman hook
 
 ```bash
@@ -1203,6 +1203,9 @@ nvim /etc/pacman.d/hooks/10-uki_previous.hook
 ```
 
 - Content:
+
+<details>
+<summary>📄 <code>10-uki_previous.hook</code> content (click to expand)</summary>
 
 ```bash
 ## PACMAN PREVIOUS UKI HOOK
@@ -1233,7 +1236,7 @@ When = PreTransaction
 Exec = /usr/local/sbin/uki_previous.sh
 ```
 
----
+</details>
 
 #### ✍️ Create the UKI preservation script
 
@@ -1242,6 +1245,9 @@ nvim /usr/local/sbin/uki_previous.sh
 ```
 
 - Content:
+
+<details>
+<summary>📄 <code>uki_previous.sh</code> content (click to expand)</summary>
 
 ```bash
 #!/bin/bash
@@ -1271,7 +1277,7 @@ if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q "$EFI_LABEL"; then
 fi
 ```
 
----
+</details>
 
 #### ✅ Make the script executable
 
@@ -1282,6 +1288,86 @@ chmod +x /usr/local/sbin/uki_previous.sh
 > 🧠 The hook runs during the `PreTransaction` stage, before the pacman transaction modifies the system. The currently working UKI is therefore preserved before a kernel, firmware, DKMS or initramfs-related update can replace it.
 
 > ⚠️ The **Arch Linux (Previous)** EFI boot entry is created automatically the first time the script successfully creates `arch-linux-previous.efi`. If the entry already exists, no new entry is created.
+
+### 🛡️ Step 39 — Custom Pacman Hook to Backup /efi
+
+- 🪝 Create a hook to automatically backup /efi before critical updates
+```bash
+nvim /etc/pacman.d/hooks/20-efi_backup.hook
+```
+
+- Content:
+
+<details>
+<summary>📄 <code>20-efi_backup.hook</code> content (click to expand)</summary>
+
+```bash
+## PACMAN EFI BACKUP HOOK
+## /etc/pacman.d/hooks/10-efi_backup.hook
+
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = usr/lib/initcpio/*
+Target = usr/lib/firmware/*
+Target = usr/lib/modules/*/extramodules/
+Target = usr/lib/modules/*/vmlinuz
+Target = usr/src/*/dkms.conf
+
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = mkinitcpio
+Target = mkinitcpio-git
+
+[Action]
+Description = Backing up /efi...
+When = PreTransaction
+Exec = /usr/local/sbin/efi_backup.sh
+```
+
+</details>
+
+- ✍️ Create the backup script
+```bash
+nvim /usr/local/sbin/efi_backup.sh
+```
+
+- Content:
+
+<details>
+<summary>📄 <code>efi_backup.sh</code> content (click to expand)</summary>
+
+```bash
+#!/bin/bash
+
+## SCRIPT EFI BACKUP
+## /usr/local/sbin/efi_backup.sh
+
+BACKUP_DIR="/boot/efibackup"
+BACKUP_COUNT=3
+
+if [ ! -d "$BACKUP_DIR" ]; then
+    mkdir -p "$BACKUP_DIR"
+fi
+
+if tar -czf "$BACKUP_DIR/efi-$(date +%Y%m%d-%H%M%S).tar.gz" -C / efi; then
+    ls -1t "$BACKUP_DIR"/efi-*.tar.gz | \
+        tail -n +$((BACKUP_COUNT + 1)) | \
+        xargs -r rm --
+fi
+```
+
+</details>
+
+- ✅ Make it executable
+```bash
+chmod +x /usr/local/sbin/efi_backup.sh
+```
 
 ---
 
