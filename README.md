@@ -1154,6 +1154,122 @@ chmod 2775 /opt/games
 setfacl -dm g:games:rwx /opt/games
 ```
 
+### 🛡️ Step 39 — Preserve the Previous UKI
+
+To provide a simple recovery mechanism, the currently installed **Unified Kernel Image (UKI)** is preserved before transactions that may trigger a kernel or initramfs regeneration.
+
+The current UKI:
+
+```text
+/efi/EFI/Linux/arch-linux.efi
+```
+
+is copied to:
+
+```text
+/efi/EFI/Linux/arch-linux-previous.efi
+```
+
+The pacman transaction then proceeds normally. When the UKI is regenerated, `arch-linux.efi` is replaced with the new version, while `arch-linux-previous.efi` continues to contain the previously working UKI.
+
+The result is:
+
+```text
+Arch Linux
+└── /EFI/Linux/arch-linux.efi
+    └── Current UKI
+
+Arch Linux (Previous)
+└── /EFI/Linux/arch-linux-previous.efi
+    └── Previous UKI
+```
+
+> 💡 The previous UKI is overwritten before each relevant transaction. This means the system always keeps the **previous version of the currently installed UKI**, rather than maintaining multiple kernel versions.
+
+---
+
+#### 🪝 Create the pacman hook
+
+```bash
+nvim /etc/pacman.d/hooks/10-uki_previous.hook
+```
+
+- Content:
+
+```bash
+## PACMAN PREVIOUS UKI HOOK
+## /etc/pacman.d/hooks/10-uki_previous.hook
+
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = usr/lib/initcpio/*
+Target = usr/lib/firmware/*
+Target = usr/lib/modules/*/extramodules/
+Target = usr/lib/modules/*/vmlinuz
+Target = usr/src/*/dkms.conf
+
+[Trigger]
+Type = Package
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = mkinitcpio
+Target = mkinitcpio-git
+
+[Action]
+Description = Preserving current UKI as previous...
+When = PreTransaction
+Exec = /usr/local/sbin/uki_previous.sh
+```
+
+---
+
+#### ✍️ Create the UKI preservation script
+
+```bash
+nvim /usr/local/sbin/uki_previous.sh
+```
+
+- Content:
+
+```bash
+#!/bin/bash
+## SCRIPT PREVIOUS UKI
+## /usr/local/sbin/uki_previous.sh
+
+EFI_CURRENT="/efi/EFI/Linux/arch-linux.efi"
+EFI_PREVIOUS="/efi/EFI/Linux/arch-linux-previous.efi"
+
+if [ -f "$EFI_CURRENT" ]; then
+    cp -f "$EFI_CURRENT" "$EFI_PREVIOUS"
+fi
+
+if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q 'Arch Linux (Previous)'; then
+    efibootmgr \
+        --create \
+        --disk /dev/nvme0n1 \
+        --part 1 \
+        --label "Arch Linux (Previous)" \
+        --loader /EFI/Linux/arch-linux-previous.efi \
+        --unicode
+fi
+```
+
+---
+
+#### ✅ Make the script executable
+
+```bash
+chmod +x /usr/local/sbin/uki_previous.sh
+```
+
+> 🧠 The hook runs during the `PreTransaction` stage, before the pacman transaction modifies the system. The currently working UKI is therefore preserved before a kernel, firmware, DKMS or initramfs-related update can replace it.
+
+> ⚠️ The **Arch Linux (Previous)** EFI boot entry is created automatically the first time the script successfully creates `arch-linux-previous.efi`. If the entry already exists, no new entry is created.
+
 ---
 
 ## ❓ FAQ
