@@ -1144,7 +1144,7 @@ systemctl reboot --firmware-setup
 systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=0+7 /dev/nvme0n1p2
 ```
 
-### Step 38 — 🎮 Shared games directory (multi-user Steam library)
+### 🎮 Step 38 — Shared games directory (multi-user Steam library)
 
 - 🕹️ Allow access and inheritance for users in the `games` group via ACL
 
