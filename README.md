@@ -1243,17 +1243,22 @@ nvim /usr/local/sbin/uki_previous.sh
 EFI_CURRENT="/efi/EFI/Linux/arch-linux.efi"
 EFI_PREVIOUS="/efi/EFI/Linux/arch-linux-previous.efi"
 
+EFI_DISK="/dev/nvme0n1"
+EFI_PARTITION="1"
+EFI_LABEL="Arch Linux (Previous)"
+EFI_LOADER="/EFI/Linux/arch-linux-previous.efi"
+
 if [ -f "$EFI_CURRENT" ]; then
     cp -f "$EFI_CURRENT" "$EFI_PREVIOUS"
 fi
 
-if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q 'Arch Linux (Previous)'; then
+if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q "$EFI_LABEL"; then
     efibootmgr \
         --create \
-        --disk /dev/nvme0n1 \
-        --part 1 \
-        --label "Arch Linux (Previous)" \
-        --loader /EFI/Linux/arch-linux-previous.efi \
+        --disk "$EFI_DISK" \
+        --part "$EFI_PARTITION" \
+        --label "$EFI_LABEL" \
+        --loader "$EFI_LOADER" \
         --unicode
 fi
 ```
