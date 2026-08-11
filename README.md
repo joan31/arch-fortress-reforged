@@ -784,7 +784,13 @@ mkinitcpio -p linux
 ```bash
 efibootmgr --create --disk /dev/nvme0n1 --part 1 --label "Arch Linux" --loader /EFI/Linux/arch-linux.efi --unicode
 
-efibootmgr --create-only --disk /dev/nvme0n1 --part 1 --label "Arch Linux (Fallback)" --loader /EFI/Linux/arch-linux-fallback.efi --unicode
+efibootmgr --create --disk /dev/nvme0n1 --part 1 --label "Arch Linux (Fallback)" --loader /EFI/Linux/arch-linux-fallback.efi --unicode
+```
+
+- 🔢 Set UEFI boot order
+
+```bash
+efibootmgr -o 0000,0001
 ```
 
 ### 🧠 Step 19 — zRam Setup
@@ -1300,6 +1306,7 @@ if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q "$EFI_LABEL"; then
         --label "$EFI_LABEL" \
         --loader "$EFI_LOADER" \
         --unicode
+    efibootmgr -o 0000,0001,0002
 fi
 ```
 
