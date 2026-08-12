@@ -777,6 +777,36 @@ mkinitcpio -p linux
 
 > ℹ️ Note: TPM2-based disk decryption will be configured after the first reboot to ensure the system is fully initialized and all required services are available.
 
+> 💡 **Automatic UKI signing with `sbctl`**
+>
+> `sbctl` provides a **`mkinitcpio` post-hook** that automatically signs newly generated UKI files with the enrolled Secure Boot key.
+>
+> Therefore, no manual `sbctl sign` command is required after running `mkinitcpio`.
+>
+> - 🔍 Verify that the UKI is correctly signed:
+>
+> ```bash
+> sbctl verify
+> ```
+>
+> - ✍️ If the UKI is not signed, it can be signed manually and added to the `sbctl` database:
+>
+> ```bash
+> sbctl sign -s /efi/EFI/Linux/arch-linux.efi
+> ```
+>
+> The `-s` option saves the file path in the `sbctl` database, allowing it to be included in future automatic signing operations.
+
+- 🧹 Clean up unused initramfs images (Optional)
+
+```bash
+rm /boot/initramfs-*.img
+```
+
+> 💡 When using a Unified Kernel Image (UKI), the standalone initramfs-*.img files in /boot are no longer used for booting. They may have been generated automatically during the initial system installation with pacstrap.
+>
+> These leftover images can therefore be safely removed.
+
 ### 💻 Step 18 — EFI Boot Entry
 
 - 🧷 Register UKI with UEFI firmware
@@ -1283,8 +1313,13 @@ nvim /usr/local/sbin/uki_previous.sh
 
 ```bash
 #!/bin/bash
+
 ## SCRIPT PREVIOUS UKI
+##
 ## /usr/local/sbin/uki_previous.sh
+##
+## Dependency:
+## /usr/local/sbin/efi_bootorder.sh
 
 EFI_CURRENT="/efi/EFI/Linux/arch-linux.efi"
 EFI_PREVIOUS="/efi/EFI/Linux/arch-linux-previous.efi"
@@ -1293,6 +1328,14 @@ EFI_DISK="/dev/nvme0n1"
 EFI_PARTITION="1"
 EFI_LABEL="Arch Linux (Previous)"
 EFI_LOADER="/EFI/Linux/arch-linux-previous.efi"
+
+EFI_BOOTORDER="/usr/local/sbin/efi_bootorder.sh"
+
+# Check required dependency
+if [ ! -x "$EFI_BOOTORDER" ]; then
+    echo "Error: required dependency not found or not executable: $EFI_BOOTORDER" >&2
+    exit 1
+fi
 
 if [ -f "$EFI_CURRENT" ]; then
     cp -f "$EFI_CURRENT" "$EFI_PREVIOUS"
@@ -1306,21 +1349,62 @@ if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q "$EFI_LABEL"; then
         --label "$EFI_LABEL" \
         --loader "$EFI_LOADER" \
         --unicode
-    efibootmgr -o 0000,0001,0002
+
+    "$EFI_BOOTORDER"
 fi
 ```
 
 </details>
 
-#### ✅ Make the script executable
-
-```bash
-chmod +x /usr/local/sbin/uki_previous.sh
-```
-
 > 🧠 The hook runs during the `PreTransaction` stage, before the pacman transaction modifies the system. The currently working UKI is therefore preserved before a kernel, firmware, DKMS or initramfs-related update can replace it.
 
 > ⚠️ The **Arch Linux (Previous)** EFI boot entry is created automatically the first time the script successfully creates `arch-linux-previous.efi`. If the entry already exists, no new entry is created.
+
+#### ✍️ Create the EFI Boot reorder script
+
+```bash
+nvim /usr/local/sbin/efi_bootorder.sh
+```
+
+- Content:
+
+<details>
+<summary>📄 <code>efi_bootorder.sh</code> content (click to expand)</summary>
+
+```bash
+#!/bin/bash
+
+## SCRIPT EFI BOOT ORDER
+##
+## /usr/local/sbin/efi_bootorder.sh
+##
+## Reorder UEFI boot entries numerically.
+## This script sorts the existing BootOrder and applies the new order.
+
+set -e
+
+# Get the current BootOrder
+BOOT_ORDER=$(efibootmgr | awk -F': ' '/^BootOrder:/ {print $2}')
+
+# Abort if BootOrder could not be retrieved
+if [ -z "$BOOT_ORDER" ]; then
+    echo "Error: unable to retrieve BootOrder." >&2
+    exit 1
+fi
+
+# Sort boot entries numerically
+BOOT_ORDER=$(echo "$BOOT_ORDER" | tr ',' '\n' | sort | paste -sd, -)
+
+# Apply the new BootOrder
+efibootmgr -o "$BOOT_ORDER"
+```
+
+#### ✅ Make the script executable
+
+```bash
+chmod 750 /usr/local/sbin/uki_previous.sh
+chmod 750 /usr/local/sbin/efi_bootorder.sh
+```
 
 ### 🛡️ Step 39 — Custom Pacman Hook to Backup /efi
 
@@ -1399,7 +1483,7 @@ fi
 
 - ✅ Make it executable
 ```bash
-chmod +x /usr/local/sbin/efi_backup.sh
+chmod 750 /usr/local/sbin/efi_backup.sh
 ```
 
 ---
