@@ -1399,6 +1399,8 @@ BOOT_ORDER=$(echo "$BOOT_ORDER" | tr ',' '\n' | sort | paste -sd, -)
 efibootmgr -o "$BOOT_ORDER"
 ```
 
+</details>
+
 #### ✅ Make the script executable
 
 ```bash
