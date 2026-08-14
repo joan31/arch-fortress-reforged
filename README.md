@@ -814,7 +814,7 @@ rm /boot/initramfs-*.img
 ```bash
 efibootmgr --create --disk /dev/nvme0n1 --part 1 --label "Arch Linux" --loader /EFI/Linux/arch-linux.efi --unicode
 
-efibootmgr --create --disk /dev/nvme0n1 --part 1 --label "Arch Linux (Fallback)" --loader /EFI/Linux/arch-linux-fallback.efi --unicode
+efibootmgr --create-only --disk /dev/nvme0n1 --part 1 --label "Arch Linux Fallback" --loader /EFI/Linux/arch-linux-fallback.efi --unicode
 ```
 
 - 🔢 Set UEFI boot order
@@ -1269,7 +1269,7 @@ nvim /etc/pacman.d/hooks/10-uki_previous.hook
 <details>
 <summary>📄 <code>10-uki_previous.hook</code> content (click to expand)</summary>
 
-```bash
+```ini
 ## PACMAN PREVIOUS UKI HOOK
 ## /etc/pacman.d/hooks/10-uki_previous.hook
 
@@ -1318,30 +1318,34 @@ nvim /usr/local/sbin/uki_previous.sh
 ##
 ## /usr/local/sbin/uki_previous.sh
 ##
-## Dependency:
-## /usr/local/sbin/efi_bootorder.sh
+## Preserve the current UKI before a pacman transaction
+## and add the Previous EFI entry at the end of BootOrder.
+
+set -e
 
 EFI_CURRENT="/efi/EFI/Linux/arch-linux.efi"
 EFI_PREVIOUS="/efi/EFI/Linux/arch-linux-previous.efi"
 
 EFI_DISK="/dev/nvme0n1"
 EFI_PARTITION="1"
-EFI_LABEL="Arch Linux (Previous)"
+EFI_LABEL="Arch Linux Previous"
 EFI_LOADER="/EFI/Linux/arch-linux-previous.efi"
-
-EFI_BOOTORDER="/usr/local/sbin/efi_bootorder.sh"
-
-# Check required dependency
-if [ ! -x "$EFI_BOOTORDER" ]; then
-    echo "Error: required dependency not found or not executable: $EFI_BOOTORDER" >&2
-    exit 1
-fi
 
 if [ -f "$EFI_CURRENT" ]; then
     cp -f "$EFI_CURRENT" "$EFI_PREVIOUS"
 fi
 
 if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q "$EFI_LABEL"; then
+
+    # Save the current BootOrder
+    BOOT_ORDER=$(efibootmgr | awk -F': ' '/^BootOrder:/ {print $2}')
+
+    if [ -z "$BOOT_ORDER" ]; then
+        echo "Error: unable to retrieve BootOrder." >&2
+        exit 1
+    fi
+
+    # Create the Previous EFI entry
     efibootmgr \
         --create-only \
         --disk "$EFI_DISK" \
@@ -1350,7 +1354,17 @@ if [ -f "$EFI_PREVIOUS" ] && ! efibootmgr | grep -q "$EFI_LABEL"; then
         --loader "$EFI_LOADER" \
         --unicode
 
-    "$EFI_BOOTORDER"
+    # Get the newly created EFI entry number
+    NEW_ENTRY=$(efibootmgr | awk -v label="$EFI_LABEL" \
+        '$1 ~ /^Boot[0-9A-Fa-f]{4}\*/ && $0 ~ label {print substr($1, 5, 4)}')
+
+    if [ -z "$NEW_ENTRY" ]; then
+        echo "Error: unable to retrieve the new EFI entry." >&2
+        exit 1
+    fi
+
+    # Restore the original BootOrder and append Previous at the end
+    efibootmgr -o "$BOOT_ORDER,$NEW_ENTRY"
 fi
 ```
 
@@ -1360,55 +1374,15 @@ fi
 
 > ⚠️ The **Arch Linux (Previous)** EFI boot entry is created automatically the first time the script successfully creates `arch-linux-previous.efi`. If the entry already exists, no new entry is created.
 
-#### ✍️ Create the EFI Boot reorder script
-
-```bash
-nvim /usr/local/sbin/efi_bootorder.sh
-```
-
-- Content:
-
-<details>
-<summary>📄 <code>efi_bootorder.sh</code> content (click to expand)</summary>
-
-```bash
-#!/bin/bash
-
-## SCRIPT EFI BOOT ORDER
-##
-## /usr/local/sbin/efi_bootorder.sh
-##
-## Reorder UEFI boot entries numerically.
-## This script sorts the existing BootOrder and applies the new order.
-
-set -e
-
-# Get the current BootOrder
-BOOT_ORDER=$(efibootmgr | awk -F': ' '/^BootOrder:/ {print $2}')
-
-# Abort if BootOrder could not be retrieved
-if [ -z "$BOOT_ORDER" ]; then
-    echo "Error: unable to retrieve BootOrder." >&2
-    exit 1
-fi
-
-# Sort boot entries numerically
-BOOT_ORDER=$(echo "$BOOT_ORDER" | tr ',' '\n' | sort | paste -sd, -)
-
-# Apply the new BootOrder
-efibootmgr -o "$BOOT_ORDER"
-```
-
-</details>
+> 💡 When the EFI entry is created, `efibootmgr` temporarily places the new entry at the beginning of `BootOrder`. The script therefore saves the existing `BootOrder` before creating the entry, then restores it and appends the **Arch Linux (Previous)** entry at the end. This preserves the existing boot priority.
 
 #### ✅ Make the script executable
 
 ```bash
 chmod 750 /usr/local/sbin/uki_previous.sh
-chmod 750 /usr/local/sbin/efi_bootorder.sh
 ```
 
-### 🛡️ Step 39 — Custom Pacman Hook to Backup /efi
+### 🛡️ Step 40 — Custom Pacman Hook to Backup /efi
 
 - 🪝 Create a hook to automatically backup /efi before critical updates
 ```bash
@@ -1466,6 +1440,8 @@ nvim /usr/local/sbin/efi_backup.sh
 
 ## SCRIPT EFI BACKUP
 ## /usr/local/sbin/efi_backup.sh
+
+set -e
 
 BACKUP_DIR="/boot/efibackup"
 BACKUP_COUNT=5
